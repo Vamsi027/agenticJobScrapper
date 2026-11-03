@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Matches</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💼</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Job Matches</h1>
+      <p id="stats" class="muted">Loading…</p>
+    </div>
+    <button id="run-btn" class="btn" title="Fetch new postings from all enabled sources">Run scraper</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>Your profile</h2>
+        <p id="profile-summary" class="muted small"></p>
+        <dl id="profile-facts" class="facts"></dl>
+        <h3>Skills <span class="muted small">(weight)</span></h3>
+        <div id="profile-skills" class="chips"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Filter</h2>
+        <label class="field">
+          <span>Search</span>
+          <input id="f-search" type="search" placeholder="Title, company, skill…">
+        </label>
+        <label class="field">
+          <span>Sort by</span>
+          <select id="f-sort">
+            <option value="rank">Best match</option>
+            <option value="date">Newest posted</option>
+            <option value="seen">Recently found</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Posted within</span>
+          <select id="f-age">
+            <option value="3">Last 3 days</option>
+            <option value="5">Last 5 days</option>
+            <option value="7">Last week</option>
+            <option value="30">Last 30 days</option>
+            <option value="">Any time</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Source</span>
+          <select id="f-source"><option value="">All sources</option></select>
+        </label>
+        <label class="field">
+          <span>Minimum score: <b id="f-min-label">0</b></span>
+          <input id="f-min" type="range" min="0" max="20" value="0">
+        </label>
+        <label class="check"><input id="f-remote" type="checkbox"> Remote only</label>
+        <label class="check"><input id="f-all" type="checkbox"> Show jobs that don't fit profile</label>
+      </section>
+    </aside>
+
+    <main>
+      <div id="jobs" class="jobs"></div>
+      <p id="empty" class="muted empty" hidden>No jobs match these filters.</p>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

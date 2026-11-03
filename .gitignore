@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+# Generated static site (built by the workflow / `python -m jobscraper.web --export site`)
+site/
+# Test configs
+config/test.json
+# data/ is mostly generated, but the database is committed so the scheduled
+# GitHub workflow remembers which jobs it has already seen between runs.
+data/*
+!data/jobs.sqlite
+!data/ranked_jobs.csv

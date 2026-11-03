@@ -1,0 +1,216 @@
+{
+  "keywords": [
+    "java",
+    "spring boot",
+    "node.js",
+    "bigquery",
+    "gcp",
+    "angular",
+    "backend",
+    "data engineer"
+  ],
+  "locations": [
+    "Hyderabad",
+    "Remote"
+  ],
+  "remote_only": false,
+  "remote_allowed_regions": [
+    "worldwide",
+    "anywhere",
+    "global",
+    "india",
+    "apac",
+    "asia"
+  ],
+  "max_days_old": 5,
+  "profile": {
+    "_comment": "From resume (Oct 2026): ~4 yrs. Targeting associate / mid-level Software Engineer roles (no senior+). Latest role CVS Health: Java, Node.js, GCP BigQuery, API extraction, Tableau. Earlier: Spring Boot, Angular, microservices.",
+    "min_score": 4,
+    "max_years_required": 4,
+    "title_include": [
+      "engineer",
+      "developer",
+      "sde",
+      "software",
+      "backend",
+      "back end",
+      "full stack",
+      "fullstack",
+      "programmer",
+      "data",
+      "associate"
+    ],
+    "title_exclude": [
+      "staff",
+      "principal",
+      "lead",
+      "manager",
+      "director",
+      "architect",
+      "head",
+      "vp",
+      "intern",
+      "internship",
+      "sales",
+      "recruiter",
+      "ios",
+      "android",
+      "senior",
+      "sr",
+      "iii",
+      "iv",
+      "3",
+      "4",
+      "smts",
+      "lmts",
+      "pmts"
+    ],
+    "skills": {
+      "java": 3,
+      "node.js": 3,
+      "nodejs": 3,
+      "node": 1,
+      "bigquery": 3,
+      "gcp": 3,
+      "google cloud": 3,
+      "spring boot": 3,
+      "spring": 1,
+      "microservices": 2,
+      "rest": 1,
+      "rest api": 1,
+      "api": 1,
+      "angular": 2,
+      "typescript": 1,
+      "javascript": 1,
+      "express": 1,
+      "etl": 2,
+      "data pipeline": 2,
+      "data pipelines": 2,
+      "data engineering": 2,
+      "tableau": 2,
+      "sql": 1,
+      "mysql": 1,
+      "nosql": 1,
+      "aws": 1,
+      "ec2": 1,
+      "jenkins": 1,
+      "ci/cd": 1,
+      "python": 1
+    }
+  },
+  "max_per_source": 100,
+  "sources": {
+    "remoteok": true,
+    "remotive": true,
+    "jobicy": true,
+    "hn": true,
+    "greenhouse": true,
+    "lever": true,
+    "adzuna": true,
+    "jsearch": true,
+    "brightdata_linkedin": true,
+    "browser_board": true
+  },
+  "greenhouse_companies": [
+    "highradius",
+    "zscaler",
+    "coinbase",
+    "newrelic",
+    "gitlab",
+    "samsara",
+    "twilio",
+    "databricks",
+    "zenoti",
+    "singlestore",
+    "starburst",
+    "netskope",
+    "airbnb",
+    "yugabyte",
+    "sentinellabs",
+    "fivetran",
+    "turing"
+  ],
+  "lever_companies": [
+    "zeta",
+    "outreach",
+    "cred",
+    "jumpcloud",
+    "mindtickle"
+  ],
+  "jobicy_geos": [
+    "anywhere",
+    "apac"
+  ],
+  "adzuna": {
+    "country": "in",
+    "where": "Hyderabad",
+    "max_days_old": 5
+  },
+  "jsearch": {
+    "country": "in",
+    "date_posted": "week",
+    "queries": [
+      {
+        "query": "java node.js software engineer jobs in Hyderabad, India"
+      },
+      {
+        "query": "associate software engineer GCP BigQuery jobs in Hyderabad, India"
+      },
+      {
+        "query": "java backend software engineer remote",
+        "remote": true
+      }
+    ]
+  },
+  "brightdata_linkedin": {
+    "_comment": "LinkedIn via Bright Data (needs BRIGHTDATA_API_KEY). Billed per record: at most limit_per_input x queries records per run. time_range uses LinkedIn's labels (Past 24 hours / Past week / Past month / Any time); there is no 5-day option, max_days_old trims the rest.",
+    "limit_per_input": 25,
+    "timeout_minutes": 10,
+    "poll_seconds": 15,
+    "queries": [
+      {
+        "keyword": "Java Developer",
+        "location": "Hyderabad",
+        "country": "IN",
+        "time_range": "Past week"
+      },
+      {
+        "keyword": "Node.js Software Engineer",
+        "location": "Hyderabad",
+        "country": "IN",
+        "time_range": "Past week"
+      },
+      {
+        "keyword": "GCP BigQuery Data Engineer",
+        "location": "Hyderabad",
+        "country": "IN",
+        "time_range": "Past week"
+      },
+      {
+        "keyword": "Java Backend Engineer",
+        "location": "India",
+        "country": "IN",
+        "time_range": "Past week",
+        "remote": "Remote"
+      }
+    ]
+  },
+  "browser_board": {
+    "_comment": "S&P Global's Workday careers site (JS-rendered; large Hyderabad tech center). The data-automation-id selectors work on any *.myworkdayjobs.com board, so to switch companies change only name + url. Detail pages supply the full description (needed for skill scoring) and all locations (the list shows '2 Locations').",
+    "name": "spglobal",
+    "url": "https://spgi.wd5.myworkdayjobs.com/SPGI_Careers?q=software%20engineer%20hyderabad",
+    "item_selector": "section[data-automation-id=\"jobResults\"] li:has([data-automation-id=\"jobTitle\"])",
+    "fields": {
+      "title": "[data-automation-id=\"jobTitle\"]",
+      "location": "[data-automation-id=\"locations\"] dd",
+      "posted": "[data-automation-id=\"postedOn\"] dd"
+    },
+    "link_selector": "[data-automation-id=\"jobTitle\"]",
+    "wait_selector": "[data-automation-id=\"jobTitle\"]",
+    "detail_fields": {
+      "description": "[data-automation-id=\"jobPostingDescription\"]",
+      "location": "[data-automation-id=\"locations\"] dd"
+    },
+    "detail_limit": 20
+  }
+}
