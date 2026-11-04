@@ -28,6 +28,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* beats .layout/.row etc. display rules */
 
 body {
   margin: 0;
@@ -249,3 +250,22 @@ button.chip { font: inherit; font-size: 12px; cursor: pointer; }
 button.chip.hit:hover, button.chip.active { background: var(--accent); color: #fff; }
 button.chip.active b, button.chip.hit:hover b { color: #fff; }
 .jobs.loading { opacity: .5; transition: opacity .2s; }
+
+/* ---- sign-in ---- */
+.tabs { display: flex; gap: 4px; margin: 4px 0 14px; border-bottom: 1px solid var(--border); }
+.tab {
+  border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600;
+  padding: 6px 10px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.btn.wide { width: 100%; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.warn-text { color: var(--mid); min-height: 1em; }
+dialog {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); padding: 0; width: min(420px, 94vw);
+}
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+.dialog-form { padding: 20px; }
+.dialog-form > p { margin: 4px 0 12px; }

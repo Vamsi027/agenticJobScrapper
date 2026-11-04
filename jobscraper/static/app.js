@@ -19,7 +19,10 @@ const EDITABLE = ["name", "target_roles", "locations", "open_to_remote", "remote
 function show(view) {
   for (const v of ["signin", "upload", "matches"]) $(`view-${v}`).hidden = v !== view;
   $("account").hidden = !state.user;
-  $("account-email").textContent = state.user?.email ?? "";
+  const guest = !!state.user?.is_anonymous;
+  $("account-email").textContent = guest ? "Guest (this browser only)" : state.user?.email ?? "";
+  $("password-btn").hidden = !state.user || guest;
+  $("signout-btn").textContent = guest ? "Leave guest mode" : "Sign out";
 }
 
 async function route() {
@@ -65,30 +68,92 @@ async function showMatches() {
 
 // ---------------------------------------------------------------- auth
 
+let authMode = "signin";
+document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+  authMode = tab.dataset.mode;
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.toggle("on", t === tab);
+    t.setAttribute("aria-selected", t === tab);
+  });
+  const signup = authMode === "signup";
+  $("signin-btn").textContent = signup ? "Create account" : "Sign in";
+  $("pw-hint").hidden = !signup;
+  $("signin-password").minLength = signup ? 8 : 6;
+  $("signin-password").autocomplete = signup ? "new-password" : "current-password";
+  $("signin-msg").textContent = "";
+}));
+
+// Turn Supabase's messages into something a user can act on.
+function authError(error) {
+  const m = error.message || String(error);
+  if (/invalid login credentials/i.test(m)) return "Wrong email or password. New here? Use Create account.";
+  if (/already registered/i.test(m)) return "That email already has an account. Use Sign in (or Set password from a signed-in session).";
+  if (/anonymous sign-ins are disabled/i.test(m)) return "Guest mode isn't enabled yet (Supabase: Authentication -> Sign In / Providers -> Allow anonymous sign-ins).";
+  if (/signups not allowed|signup is disabled/i.test(m)) return "New accounts are switched off in Supabase.";
+  if (/rate limit/i.test(m)) return "Too many attempts. Wait a few minutes and try again.";
+  return m;
+}
+
 $("signin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = $("signin-email").value.trim();
-  const btn = e.submitter;
+  const password = $("signin-password").value;
+  const btn = $("signin-btn");
   btn.disabled = true;
-  $("signin-msg").textContent = "Sending…";
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: window.location.origin + window.location.pathname },
-  });
-  btn.disabled = false;
-  $("signin-msg").textContent = error
-    ? `Could not send the link: ${error.message}`
-    : `Check ${email} for a sign-in link. You can close this tab.`;
+  $("signin-msg").textContent = "";
+  try {
+    if (authMode === "signup") {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      if (!data.session) {
+        // Supabase is set to confirm emails, so no session until the link is clicked.
+        $("signin-msg").textContent = `Account created. Confirm it from the email sent to ${email}, then sign in.`;
+      }
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    }
+  } catch (err) {
+    $("signin-msg").textContent = authError(err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("guest-btn").addEventListener("click", async () => {
+  $("guest-btn").disabled = true;
+  $("signin-msg").textContent = "";
+  const { error } = await supabase.auth.signInAnonymously();
+  $("guest-btn").disabled = false;
+  if (error) $("signin-msg").textContent = authError(error);
+});
+
+$("password-btn").addEventListener("click", () => {
+  $("new-password").value = "";
+  $("password-msg").textContent = "";
+  $("password-dialog").showModal();
+});
+$("password-form").addEventListener("submit", async (e) => {
+  if (e.submitter?.value !== "save") return; // Cancel closes the dialog
+  e.preventDefault();
+  const password = $("new-password").value;
+  if (password.length < 8) return ($("password-msg").textContent = "Use at least 8 characters.");
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return ($("password-msg").textContent = authError(error));
+  $("password-dialog").close();
+  setStatus("Password saved ✓", "ok");
 });
 
 $("signout-btn").addEventListener("click", async () => {
+  if (state.user?.is_anonymous &&
+      !confirm("Leaving guest mode loses access to this guest profile for good. Continue?")) return;
   await supabase.auth.signOut();
   Object.assign(state, { user: null, applicant: null, jobs: [], loadedArgs: null, skillFilter: null });
   routeOnce();
 });
 
 supabase.auth.onAuthStateChange((event) => {
-  // SIGNED_IN fires after the magic link redirect; ignore token refreshes.
+  // SIGNED_IN fires after password / guest sign-in; ignore token refreshes.
   // Deferred: calling Supabase inside this callback can deadlock supabase-js.
   if (event === "SIGNED_IN" && !state.user) setTimeout(routeOnce, 0);
 });

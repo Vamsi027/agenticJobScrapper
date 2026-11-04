@@ -16,23 +16,35 @@
     <div class="topbar-actions" id="account" hidden>
       <span id="save-status" class="save-status" aria-live="polite"></span>
       <span id="account-email" class="muted small"></span>
+      <button id="password-btn" class="btn ghost small-btn" hidden>Set password</button>
       <button id="signout-btn" class="btn ghost">Sign out</button>
     </div>
   </header>
 
-  <!-- 1. Signed out: email magic link -->
+  <!-- 1. Signed out: email + password, or guest -->
   <section id="view-signin" class="center-card" hidden>
     <div class="panel">
       <h2>Find jobs that fit your resume</h2>
-      <p class="muted">Sign in with your email, upload your resume, and every scraped posting is ranked against your skills and experience.</p>
+      <p class="muted">Upload your resume and every scraped posting is ranked against your skills, experience and locations.</p>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab on" data-mode="signin" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" class="tab" data-mode="signup" aria-selected="false">Create account</button>
+      </div>
       <form id="signin-form">
         <label class="field">
           <span>Email</span>
           <input id="signin-email" type="email" required autocomplete="email" placeholder="you@example.com">
         </label>
-        <button class="btn" type="submit">Email me a sign-in link</button>
+        <label class="field">
+          <span>Password <em class="muted" id="pw-hint" hidden>(at least 8 characters)</em></span>
+          <input id="signin-password" type="password" required minlength="6" autocomplete="current-password">
+        </label>
+        <button class="btn wide" type="submit" id="signin-btn">Sign in</button>
       </form>
-      <p id="signin-msg" class="muted small" role="status"></p>
+      <div class="divider"><span>or</span></div>
+      <button type="button" class="btn ghost wide" id="guest-btn">Continue as guest</button>
+      <p class="muted small">Guest profiles are saved in this browser only.</p>
+      <p id="signin-msg" class="small warn-text" role="status"></p>
     </div>
   </section>
 
@@ -160,6 +172,23 @@
       <p id="empty" class="muted empty" hidden></p>
     </main>
   </div>
+
+  <!-- Set / change password (signed-in email accounts) -->
+  <dialog id="password-dialog">
+    <form id="password-form" method="dialog" class="dialog-form">
+      <h2>Set a password</h2>
+      <p class="muted small">Use it to sign in with your email on any device.</p>
+      <label class="field">
+        <span>New password <em class="muted">(at least 8 characters)</em></span>
+        <input id="new-password" type="password" minlength="8" autocomplete="new-password">
+      </label>
+      <p id="password-msg" class="small warn-text" role="status"></p>
+      <div class="row">
+        <button class="btn" value="save">Save password</button>
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>

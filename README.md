@@ -7,7 +7,7 @@ A daily scraper collects job postings from many job sites into Supabase, unfilte
 ```
                  daily (GitHub Actions)                              in the browser (GitHub Pages)
 ┌───────────────────────────────────────────────────┐     ┌──────────────────────────────────────────────┐
-│ applicants' target roles + cities -> search queries│     │ sign in (email link) -> upload resume (PDF)  │
+│ applicants' target roles + cities -> search queries│     │ sign in (password/guest) -> upload resume    │
 │ fetch all sources -> clean + dedupe                │     │   -> parse-resume Edge Function (Claude)     │
 │   -> upsert into job_postings (no filtering)       │     │   -> applicant row                           │
 └───────────────────────────────────────────────────┘     │ match_jobs() ranks job_postings for the user │
@@ -67,8 +67,11 @@ Seniority isn't filtered: senior and lead roles show up when they match. Skills 
    supabase functions deploy parse-resume --no-verify-jwt   # the function verifies the user itself
    supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
    ```
-3. **Authentication -> URL Configuration**: set **Site URL** to the GitHub Pages URL and add `http://localhost:8000` and the Pages URL under **Redirect URLs**. Magic links redirect only to listed URLs.
-4. For more than a handful of users, set up custom SMTP (**Authentication -> Emails**). The built-in email sender is rate-limited to a few emails per hour.
+3. **Authentication -> Sign In / Providers**:
+   - **Email**: keep enabled and turn **off** "Confirm email". Users sign up and sign in with email + password, and no email is sent (Supabase's built-in sender allows only a few emails per hour).
+   - **Allow anonymous sign-ins**: turn **on** for "Continue as guest". A guest profile lives in that browser only; signing out loses it.
+   - To require email confirmation or offer password resets later, set up custom SMTP first (**Authentication -> Emails**).
+4. **Authentication -> URL Configuration**: Site URL = the GitHub Pages URL (used in any emails Supabase sends).
 
 ### 2. Scraper keys
 
