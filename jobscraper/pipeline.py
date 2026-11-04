@@ -6,6 +6,7 @@ Run with: python -m jobscraper [--only remoteok,greenhouse] [--dry-run]
 """
 
 import argparse
+import sys
 from collections import Counter
 
 from jobscraper import db
@@ -64,6 +65,8 @@ def run(settings=SETTINGS, only=None, dry_run=False):
 
 
 def main():
+    # Job titles contain any Unicode; Windows consoles (cp1252) can't print all of it.
+    sys.stdout.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(description="Scrape job boards into Supabase.")
     parser.add_argument("--only", help="comma-separated source names to run (ignores the enabled flags)")
     parser.add_argument("--dry-run", action="store_true",

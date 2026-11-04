@@ -116,9 +116,15 @@ Deno.serve(async (req) => {
     ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: encodeBase64(new Uint8Array(await file.arrayBuffer())) } }
     : { type: "document" as const, source: { type: "text" as const, media_type: "text/plain" as const, data: await file.text() } };
 
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) {
+    console.error("ANTHROPIC_API_KEY secret is not set");
+    return json({ error: "Resume parsing isn't configured yet (missing Claude API key)." }, 503);
+  }
+
   let profile;
   try {
-    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+    const anthropic = new Anthropic({ apiKey });
     const response = await anthropic.beta.messages.create({
       model: MODEL,
       max_tokens: 16000,

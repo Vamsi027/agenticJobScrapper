@@ -1,10 +1,10 @@
 -- Multi-user schema: unfiltered job_postings, per-user applicant profiles,
 -- server-side matching, and a private resumes bucket.
 --
--- Both tables were created by hand as empty placeholders (0 rows on 2026-11-03),
--- so they are recreated rather than altered.
-drop table if exists public.job_postings;
-drop table if exists public.applicant;
+-- The hand-made placeholder tables (empty on 2026-11-03) were renamed to
+-- job_postings_old / applicant_old before this ran; drop them once unneeded.
+alter table if exists public.job_postings rename to job_postings_old;
+alter table if exists public.applicant rename to applicant_old;
 
 -- ---------------------------------------------------------------------------
 -- job_postings: every scraped job, unfiltered. Written only by the scraper
