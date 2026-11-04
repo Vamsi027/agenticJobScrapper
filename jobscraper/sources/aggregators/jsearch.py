@@ -1,8 +1,9 @@
 """JSearch on RapidAPI (Google for Jobs). Needs the RAPIDAPI_KEY env var.
 
 Surfaces LinkedIn / Naukri / Indeed / Glassdoor listings without scraping them.
-Free tier is small (~200 requests/month), so each run makes one request
-per entry in config "jsearch.queries".
+One request per search target from the applicants ("<role> jobs in <city>",
+or "<role> remote" for remote targets), capped by jsearch.max_queries since the
+free tier is small (~200 requests/month).
 Sign up: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
 """
 
@@ -20,25 +21,35 @@ def _location(entry):
     return place
 
 
+def queries(config):
+    settings = config.get("jsearch", {})
+    out = []
+    for target in config.get("search_targets", []):
+        if target["remote"]:
+            text = f"{target['role']} remote"
+        else:
+            where = ", ".join(p for p in (target["city"], target["country"]) if p)
+            text = f"{target['role']} jobs in {where}"
+        out.append({"query": text, "country": target["country_code"].lower(),
+                    "remote": target["remote"]})
+    return out[: settings.get("max_queries", 5)]
+
+
 def fetch(config):
     api_key = os.environ.get("RAPIDAPI_KEY")
     if not api_key:
         print("  jsearch: RAPIDAPI_KEY not set, skipping")
         return []
 
-    jsearch = config.get("jsearch", {})
-    keywords = " ".join(config.get("keywords", []))
+    settings = config.get("jsearch", {})
     headers = {"X-RapidAPI-Key": api_key, "X-RapidAPI-Host": JSEARCH_HOST}
-    limit = config.get("max_per_source", 100)
 
     jobs = []
-    for q in jsearch.get("queries", []):
-        params = {
-            "query": q["query"].format(keywords=keywords),
-            "country": jsearch.get("country", "in"),
-            "date_posted": jsearch.get("date_posted", "week"),
-        }
-        if q.get("remote"):
+    for q in queries(config):
+        params = {"query": q["query"], "date_posted": settings.get("date_posted", "week")}
+        if q["country"]:
+            params["country"] = q["country"]
+        if q["remote"]:
             params["work_from_home"] = "true"
         try:
             data = get_json(API_URL, params=params, headers=headers)
@@ -46,7 +57,7 @@ def fetch(config):
             print(f"  jsearch/{params['query']!r}: skipped ({exc})")
             continue
         # search-v2 wraps results as {"data": {"jobs": [...], "cursor": ...}}; 10 jobs per request
-        for entry in (data.get("data") or {}).get("jobs", [])[:limit]:
+        for entry in (data.get("data") or {}).get("jobs", []):
             salary = ""
             if entry.get("job_min_salary") and entry.get("job_max_salary"):
                 salary = (f"{entry.get('job_salary_currency') or ''} "
@@ -59,7 +70,7 @@ def fetch(config):
                 "salary": salary,
                 "url": entry.get("job_apply_link", ""),
                 "posted_date": entry.get("job_posted_at_datetime_utc", ""),
-                "description_snippet": entry.get("job_description", ""),
+                "description": entry.get("job_description", ""),
                 "source": f"jsearch:{entry.get('job_publisher', '')}",
             })
-    return jobs
+    return jobs[: config.get("max_per_source")]

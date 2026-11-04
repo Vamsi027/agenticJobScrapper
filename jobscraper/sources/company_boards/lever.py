@@ -1,14 +1,14 @@
-"""Lever public postings API, one call per company in the config."""
+"""Lever public postings API, one call per company. Every posting is kept."""
 
 from datetime import datetime, timezone
 
 from jobscraper.fetchers import get_json
-from jobscraper.normalize import clean_text, config_location_ok
+from jobscraper.normalize import clean_text
 from jobscraper.sites import LEVER_API as API_URL
 
 
 def fetch(config):
-    limit = config.get("max_per_source", 100)
+    limit = config.get("max_per_source")
     jobs = []
     for company in config.get("lever_companies", []):
         try:
@@ -16,15 +16,8 @@ def fetch(config):
         except Exception as exc:
             print(f"  lever/{company}: skipped ({exc})")
             continue
-        kept = 0
-        for entry in data:
+        for entry in data[:limit]:
             location = clean_text((entry.get("categories") or {}).get("location", ""))
-            # Big boards list hundreds of jobs worldwide; cap only the ones we'd keep.
-            if not config_location_ok(location, "remote" in location.lower(), config):
-                continue
-            if kept >= limit:
-                break
-            kept += 1
             posted = ""
             if entry.get("createdAt"):
                 posted = datetime.fromtimestamp(
@@ -38,7 +31,7 @@ def fetch(config):
                 "salary": "",
                 "url": entry.get("hostedUrl", ""),
                 "posted_date": posted,
-                "description_snippet": entry.get("descriptionPlain", ""),
+                "description": entry.get("descriptionPlain", ""),
                 "source": "lever",
             })
     return jobs

@@ -160,3 +160,92 @@ a { color: var(--accent); }
 .s-low { color: var(--low); }   .bg-low { background: var(--low); }
 
 .empty { text-align: center; padding: 40px 0; }
+
+/* ---- auth / upload / editor ---- */
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+.btn.small-btn { padding: 5px 10px; font-size: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.panel-actions { margin-top: 14px; }
+.center-card { max-width: 480px; margin: 48px auto; padding: 0 16px; }
+.center-card .panel { padding: 24px; }
+.center-card p { margin: 6px 0 16px; }
+.field input:not([type=checkbox]):not([type=range]), .field textarea {
+  font: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+}
+.field textarea { resize: vertical; }
+.field em { font-style: normal; font-size: 12px; }
+
+/* ---- interactive profile ---- */
+.name-input {
+  font: inherit; font-size: 16px; font-weight: 700; width: 100%;
+  border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; margin: -4px -6px 2px;
+  background: transparent; color: var(--text);
+}
+.name-input:hover, .name-input:focus { border-color: var(--border); background: var(--bg); outline: none; }
+.hint { margin: 4px 0 0; font-style: italic; }
+.group { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 4px; }
+.group h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.chip.removable { display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+.chip.removable button, .skill-row .x {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 3px; border-radius: 4px;
+}
+.chip.removable button:hover, .skill-row .x:hover { color: #d14343; background: var(--accent-soft); }
+.add-row { display: flex; gap: 6px; margin-top: 8px; }
+.add-row input, .add-row select {
+  font: inherit; font-size: 13px; min-width: 0; flex: 1;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg); color: var(--text);
+}
+.add-row select { flex: 0 0 auto; }
+.add-row .cc-input { flex: 0 0 46px; text-transform: uppercase; }
+.switch { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; cursor: pointer; }
+.skill-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.skill-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 13px; }
+.skill-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weights { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.weights button {
+  border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px;
+  width: 24px; padding: 2px 0; cursor: pointer;
+}
+.weights button + button { border-left: 1px solid var(--border); }
+.weights button.on { background: var(--accent); color: #fff; font-weight: 700; }
+.weights button:not(.on):hover { background: var(--accent-soft); color: var(--accent); }
+.stepper { display: inline-flex; align-items: center; gap: 8px; }
+.stepper button {
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; cursor: pointer;
+}
+.stepper output { min-width: 70px; text-align: center; font-weight: 600; }
+details summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
+.save-status { font-size: 12px; color: var(--muted); }
+.save-status.ok { color: var(--good); }
+.save-status.error { color: #d14343; }
+
+/* ---- upload drop zone ---- */
+.drop {
+  display: block; border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 28px 16px; text-align: center; margin-bottom: 14px; cursor: pointer; color: var(--muted);
+}
+.drop.over, .drop:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.drop input { display: none; }
+
+/* ---- job list toolbar ---- */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 12px; }
+.toolbar input[type=search] { flex: 1 1 200px; }
+.toolbar input[type=search], .toolbar select {
+  font: inherit; padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg); color: var(--text);
+}
+.toolbar .check { margin: 0; }
+.active-skill { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; }
+button.chip { font: inherit; font-size: 12px; cursor: pointer; }
+button.chip.hit:hover, button.chip.active { background: var(--accent); color: #fff; }
+button.chip.active b, button.chip.hit:hover b { color: #fff; }
+.jobs.loading { opacity: .5; transition: opacity .2s; }

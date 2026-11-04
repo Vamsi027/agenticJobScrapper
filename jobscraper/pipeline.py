@@ -1,26 +1,28 @@
-"""Pipeline: run every enabled source, normalize/filter/score/dedupe the
-results, store them in SQLite, and print only the jobs not seen before.
+"""Pipeline: build search queries from the applicants in Supabase, run every
+enabled source, clean/dedupe the results, and upsert them all into
+public.job_postings. Matching to each user happens in the database.
 
-Run with: python -m jobscraper [--config path]
+Run with: python -m jobscraper [--only remoteok,greenhouse] [--dry-run]
 """
 
 import argparse
-import json
-from pathlib import Path
+import sys
+from collections import Counter
 
-from jobscraper import storage
-from jobscraper.export import export_ranked
-from jobscraper.normalize import normalize_and_filter
+from jobscraper import db
+from jobscraper.normalize import normalize_all
+from jobscraper.queries import search_targets
+from jobscraper.settings import SETTINGS
 from jobscraper.sources import SOURCES
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "config.json"
 
-
-def run(config):
+def fetch_all(config, only=None):
     raw_jobs = []
     enabled = config.get("sources", {})
     for name, module in SOURCES.items():
-        if not enabled.get(name, False):
+        if only is not None and name not in only:
+            continue
+        if only is None and not enabled.get(name, False):
             continue
         print(f"Fetching {name} ...")
         try:
@@ -30,30 +32,47 @@ def run(config):
             continue
         print(f"  {name}: {len(found)} postings")
         raw_jobs.extend(found)
+    return raw_jobs
 
-    jobs = normalize_and_filter(raw_jobs, config)
-    new_jobs = storage.save_new(jobs)
 
-    print(f"\n{len(raw_jobs)} fetched, {len(jobs)} after filters/dedupe, "
-          f"{len(new_jobs)} new (db total: {storage.total_count()})")
-    export_ranked(jobs)
+def run(settings=SETTINGS, only=None, dry_run=False):
+    conn = None if dry_run else db.client()
+    try:
+        applicants = db.fetch_applicants(conn) if conn else []
+        config = {**settings, "search_targets": search_targets(applicants)}
+        print(f"{len(applicants)} applicants -> {len(config['search_targets'])} search targets")
 
-    if new_jobs:
-        print("\nNew jobs:")
-        for job in new_jobs:
+        raw_jobs = fetch_all(config, only)
+        jobs = normalize_all(raw_jobs, settings)
+        print(f"\n{len(raw_jobs)} fetched, {len(jobs)} after dedupe")
+        if dry_run:
+            for source, n in Counter(j["source"].split(":")[0] for j in jobs).most_common():
+                print(f"  {source}: {n}")
+            return jobs
+
+        new_jobs = db.ingest(conn, jobs)
+        pruned = db.prune(conn, settings["prune_after_days"]) if settings.get("prune_after_days") else 0
+        print(f"{len(new_jobs)} new, {pruned} stale removed (db total: {db.total_count(conn)})")
+        for job in new_jobs[:50]:
             loc = f" [{job['location']}]" if job["location"] else ""
-            print(f"- [{job['score']:>2}] {job['title']} @ {job['company']}{loc} ({job['source']})")
-            print(f"  {job['url']}")
-    return new_jobs
+            print(f"- {job['title']} @ {job['company']}{loc} ({job['source']})")
+        if len(new_jobs) > 50:
+            print(f"... and {len(new_jobs) - 50} more")
+        return new_jobs
+    finally:
+        if conn:
+            conn.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scrape job boards into SQLite.")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG),
-                        help="Path to config.json")
+    # Job titles contain any Unicode; Windows consoles (cp1252) can't print all of it.
+    sys.stdout.reconfigure(errors="replace")
+    parser = argparse.ArgumentParser(description="Scrape job boards into Supabase.")
+    parser.add_argument("--only", help="comma-separated source names to run (ignores the enabled flags)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="fetch and count, but don't touch Supabase (no applicant-based queries)")
     args = parser.parse_args()
-
-    with open(args.config, encoding="utf-8") as f:
-        config = json.load(f)
-    run(config)
-
+    only = set(args.only.split(",")) if args.only else None
+    if only and (unknown := only - SOURCES.keys()):
+        parser.error(f"unknown sources: {', '.join(sorted(unknown))}")
+    run(only=only, dry_run=args.dry_run)

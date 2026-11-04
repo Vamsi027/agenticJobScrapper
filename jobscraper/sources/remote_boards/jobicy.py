@@ -5,11 +5,11 @@ from jobscraper.sites import JOBICY_API as API_URL
 
 
 def fetch(config):
-    limit = config.get("max_per_source", 100)
+    limit = config.get("max_per_source")
     jobs = []
     for geo in config.get("jobicy_geos", ["anywhere", "apac"]):
         try:
-            data = get_json(API_URL, params={"count": min(limit, 100), "geo": geo})
+            data = get_json(API_URL, params={"count": min(limit or 100, 100), "geo": geo})
         except Exception as exc:
             print(f"  jobicy/{geo}: skipped ({exc})")
             continue
@@ -23,7 +23,7 @@ def fetch(config):
                 "salary": "",
                 "url": entry.get("url", ""),
                 "posted_date": entry.get("pubDate", ""),
-                "description_snippet": entry.get("jobExcerpt", ""),
+                "description": entry.get("jobExcerpt", ""),
                 "source": "jobicy",
             })
     return jobs

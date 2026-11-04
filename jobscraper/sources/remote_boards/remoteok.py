@@ -5,7 +5,7 @@ from jobscraper.sites import REMOTEOK_API as API_URL
 
 
 def fetch(config):
-    limit = config.get("max_per_source", 100)
+    limit = config.get("max_per_source")
     data = get_json(API_URL)
     jobs = []
     for entry in data:
@@ -22,9 +22,7 @@ def fetch(config):
             "salary": salary,
             "url": entry.get("url", ""),
             "posted_date": entry.get("date", ""),
-            "description_snippet": entry.get("description", ""),
+            "description": entry.get("description", ""),
             "source": "remoteok",
         })
-        if len(jobs) >= limit:
-            break
-    return jobs
+    return jobs[:limit]
