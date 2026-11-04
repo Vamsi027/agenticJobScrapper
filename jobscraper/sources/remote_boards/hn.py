@@ -56,7 +56,10 @@ def fetch(config):
         parts = [p.strip() for p in header.split("|")]
         company = parts[0] if parts else ""
         title = parts[1] if len(parts) > 1 else header
-        location = parts[2] if len(parts) > 2 else ""
+        # Without a "Company | Role | Location" header, keep the whole first line as
+        # the location: an empty location would make a remote job look open to
+        # everyone, even when the line says "US Only".
+        location = parts[2] if len(parts) > 2 else header
         jobs.append({
             "title": title,
             "company": company,

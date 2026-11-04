@@ -3,13 +3,16 @@ import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 const $ = (id) => document.getElementById(id);
-const state = { user: null, applicant: null, jobs: [], loadedArgs: null };
+const state = { user: null, applicant: null, jobs: [], loadedArgs: null, skillFilter: null };
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : "#");
-const list = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+// Profile fields the browser is allowed to change (see the column grants in the migrations).
+const EDITABLE = ["name", "target_roles", "locations", "open_to_remote", "remote_allowed_regions",
+  "skills", "title_include", "max_years_required", "min_score", "max_days_old"];
 
 // ---------------------------------------------------------------- views
 
@@ -36,6 +39,12 @@ async function route() {
   showMatches();
 }
 
+let routing = null;
+function routeOnce() {
+  routing ??= route().finally(() => (routing = null));
+  return routing;
+}
+
 function showUpload(replacing) {
   $("upload-title").textContent = replacing ? "Replace your resume" : "Upload your resume";
   $("upload-cancel").hidden = !replacing;
@@ -47,7 +56,6 @@ function showUpload(replacing) {
 async function showMatches() {
   show("matches");
   renderProfile();
-  // Default the age filter to the profile's preference.
   const age = $("f-age");
   const wanted = state.applicant.max_days_old == null ? "" : String(state.applicant.max_days_old);
   if (![...age.options].some((o) => o.value === wanted)) age.add(new Option(`Last ${wanted} days`, wanted), 0);
@@ -75,17 +83,9 @@ $("signin-form").addEventListener("submit", async (e) => {
 
 $("signout-btn").addEventListener("click", async () => {
   await supabase.auth.signOut();
-  state.applicant = null;
-  state.jobs = [];
-  state.loadedArgs = null;
+  Object.assign(state, { user: null, applicant: null, jobs: [], loadedArgs: null, skillFilter: null });
   routeOnce();
 });
-
-let routing = null;
-function routeOnce() {
-  routing ??= route().finally(() => (routing = null));
-  return routing;
-}
 
 supabase.auth.onAuthStateChange((event) => {
   // SIGNED_IN fires after the magic link redirect; ignore token refreshes.
@@ -95,11 +95,30 @@ supabase.auth.onAuthStateChange((event) => {
 
 // ---------------------------------------------------------------- resume upload
 
+const dropZone = $("drop-zone");
+$("upload-file").addEventListener("change", () => {
+  const file = $("upload-file").files[0];
+  $("drop-label").textContent = file ? file.name : "Drop your resume here or browse";
+});
+["dragenter", "dragover"].forEach((t) => dropZone.addEventListener(t, (e) => {
+  e.preventDefault();
+  dropZone.classList.add("over");
+}));
+["dragleave", "drop"].forEach((t) => dropZone.addEventListener(t, () => dropZone.classList.remove("over")));
+dropZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  if (e.dataTransfer.files.length) {
+    $("upload-file").files = e.dataTransfer.files;
+    $("upload-file").dispatchEvent(new Event("change"));
+  }
+});
+
 $("upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const file = $("upload-file").files[0];
   if (!file) return;
-  const ext = file.name.toLowerCase().endsWith(".pdf") ? "pdf" : file.name.toLowerCase().endsWith(".txt") ? "txt" : null;
+  const name = file.name.toLowerCase();
+  const ext = name.endsWith(".pdf") ? "pdf" : name.endsWith(".txt") ? "txt" : null;
   if (!ext) return ($("upload-msg").textContent = "Please choose a PDF or .txt file.");
   if (file.size > 10 * 1024 * 1024) return ($("upload-msg").textContent = "That file is over 10 MB.");
 
@@ -122,6 +141,7 @@ $("upload-form").addEventListener("submit", async (e) => {
     }
     state.applicant = data.applicant;
     $("upload-form").reset();
+    $("drop-label").textContent = "Drop your resume here or browse";
     await showMatches();
   } catch (err) {
     $("upload-msg").textContent = `Failed: ${err.message}`;
@@ -133,89 +153,139 @@ $("upload-form").addEventListener("submit", async (e) => {
 $("replace-btn").addEventListener("click", () => showUpload(true));
 $("upload-cancel").addEventListener("click", () => showMatches());
 
-// ---------------------------------------------------------------- profile
+// ---------------------------------------------------------------- profile editing (autosave)
+
+let saveTimer = null;
+let saving = Promise.resolve();
+
+function setStatus(text, kind = "") {
+  const el = $("save-status");
+  el.textContent = text;
+  el.className = `save-status ${kind}`;
+}
+
+/** Apply a change locally, re-render, and save after a short pause. */
+function update(changes) {
+  Object.assign(state.applicant, changes);
+  renderProfile();
+  setStatus("Unsaved…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 600);
+}
+
+async function save() {
+  await saving; // one save at a time, in order
+  saving = (async () => {
+    setStatus("Saving…");
+    const changes = Object.fromEntries(EDITABLE.map((k) => [k, state.applicant[k]]));
+    const { data, error } = await supabase.from("applicant").update(changes)
+      .eq("user_id", state.user.id).select().single();
+    if (error) return setStatus(`Not saved: ${error.message}`, "error");
+    state.applicant = data;
+    setStatus("Saved ✓", "ok");
+    await loadJobs(true);
+  })();
+  return saving;
+}
+
+const chip = (label, attrs, extra = "") =>
+  `<span class="chip removable">${esc(label)}${extra}<button type="button" ${attrs} aria-label="Remove ${esc(label)}">×</button></span>`;
 
 function renderProfile() {
   const a = state.applicant;
-  $("profile-name").textContent = a.name || "Your profile";
-  $("profile-summary").textContent = a.headline || "";
-  const places = (a.locations || []).map((p) => p.city || p.country).filter(Boolean);
-  const facts = [
-    ["Target roles", (a.target_roles || []).join(", ") || "—"],
-    ["Locations", [...places, a.open_to_remote ? "Remote" : null].filter(Boolean).join(", ") || "Any"],
-    ["Experience", a.years_experience != null ? `${+a.years_experience} yrs` : "—"],
-    ["Max years asked", a.max_years_required ?? "No limit"],
-    ["Min score", a.min_score],
-    ["Excludes", (a.title_exclude || []).filter((t) => t.length > 2).slice(0, 6).join(", ") || "—"],
-  ];
-  $("profile-facts").innerHTML = facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
-  $("profile-skills").innerHTML = Object.entries(a.skills || {})
-    .sort((x, y) => y[1] - x[1])
-    .map(([s, w]) => `<span class="chip">${esc(s)}<b>${w}</b></span>`)
-    .join("");
+  if (document.activeElement !== $("p-name")) $("p-name").value = a.name ?? "";
+  $("p-headline").textContent = a.headline ?? "";
+
+  $("p-roles").innerHTML = (a.target_roles || []).map((r, i) => chip(r, `data-remove="target_roles" data-i="${i}"`)).join("")
+    || '<span class="muted small">No target roles: every title counts.</span>';
+
+  $("p-locations").innerHTML = (a.locations || []).map((p, i) =>
+    chip([p.city, p.country_code || p.country].filter(Boolean).join(", "), `data-remove="locations" data-i="${i}"`)).join("")
+    || '<span class="muted small">No cities: only remote jobs match.</span>';
+  $("p-remote").checked = !!a.open_to_remote;
+
+  const skills = Object.entries(a.skills || {}).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+  $("p-skills").innerHTML = skills.map(([s, w]) => `
+    <div class="skill-row">
+      <span class="skill-name">${esc(s)}</span>
+      <span class="weights" role="group" aria-label="Weight for ${esc(s)}">
+        ${[1, 2, 3].map((n) => `<button type="button" class="w${n === w ? " on" : ""}" data-skill="${esc(s)}" data-weight="${n}" title="${["", "familiar", "solid", "core"][n]}">${n}</button>`).join("")}
+      </span>
+      <button type="button" class="x" data-remove-skill="${esc(s)}" aria-label="Remove ${esc(s)}">×</button>
+    </div>`).join("") || '<span class="muted small">Add skills to score jobs.</span>';
+
+  const maxScore = Math.max(20, skills.reduce((t, [, w]) => t + w, 0));
+  $("p-min-score").max = Math.min(maxScore, 40);
+  $("p-min-score").value = a.min_score ?? 1;
+  $("p-min-score-label").textContent = a.min_score ?? 1;
+  $("p-max-years").textContent = a.max_years_required == null ? "no limit" : `${a.max_years_required} years`;
+
+  $("p-include").innerHTML = (a.title_include || []).map((t, i) => chip(t, `data-remove="title_include" data-i="${i}"`)).join("")
+    || '<span class="muted small">Any title.</span>';
+  $("p-regions").innerHTML = (a.remote_allowed_regions || []).map((t, i) => chip(t, `data-remove="remote_allowed_regions" data-i="${i}"`)).join("");
 }
 
-$("edit-btn").addEventListener("click", () => {
-  const a = state.applicant;
-  const f = $("edit-form").elements;
-  f.name.value = a.name ?? "";
-  f.target_roles.value = (a.target_roles || []).join(", ");
-  f.locations.value = (a.locations || []).map((p) => [p.city, p.country, p.country_code].filter(Boolean).join(", ")).join("\n");
-  f.open_to_remote.checked = !!a.open_to_remote;
-  f.remote_allowed_regions.value = (a.remote_allowed_regions || []).join(", ");
-  f.skills.value = Object.entries(a.skills || {}).sort((x, y) => y[1] - x[1]).map(([s, w]) => `${s}:${w}`).join(", ");
-  f.title_include.value = (a.title_include || []).join(", ");
-  f.title_exclude.value = (a.title_exclude || []).join(", ");
-  f.max_years_required.value = a.max_years_required ?? "";
-  f.min_score.value = a.min_score ?? 1;
-  $("edit-msg").textContent = "";
-  $("edit-dialog").showModal();
+$("p-name").addEventListener("input", (e) => update({ name: e.target.value.trim() || null }));
+$("p-remote").addEventListener("change", (e) => update({ open_to_remote: e.target.checked }));
+$("p-min-score").addEventListener("input", (e) => {
+  $("p-min-score-label").textContent = e.target.value;
+  update({ min_score: Number(e.target.value) });
+});
+document.querySelectorAll(".stepper button").forEach((b) => b.addEventListener("click", () => {
+  const cur = state.applicant.max_years_required;
+  let next = (cur ?? 10) + Number(b.dataset.step);
+  if (cur == null && b.dataset.step > 0) return;          // already "no limit"
+  if (next > 15) next = null;                             // past 15 means no limit
+  update({ max_years_required: next == null ? null : Math.max(0, next) });
+}));
+
+// Remove buttons on chips and skill rows, and weight buttons.
+$("view-matches").addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.dataset.remove) {
+    const field = t.dataset.remove;
+    update({ [field]: state.applicant[field].filter((_, i) => i !== Number(t.dataset.i)) });
+  } else if (t.dataset.removeSkill) {
+    const { [t.dataset.removeSkill]: _, ...rest } = state.applicant.skills;
+    update({ skills: rest });
+  } else if (t.dataset.weight) {
+    update({ skills: { ...state.applicant.skills, [t.dataset.skill]: Number(t.dataset.weight) } });
+  }
 });
 
-function readProfileForm() {
-  const f = $("edit-form").elements;
-  const skills = {};
-  for (const part of list(f.skills.value)) {
-    const [name, weight] = part.split(":").map((x) => x.trim());
-    const w = Number(weight ?? 1);
-    if (!name || !Number.isInteger(w) || w < 1 || w > 3) throw new Error(`Bad skill entry "${part}" (use skill:1, skill:2 or skill:3)`);
-    skills[name.toLowerCase()] = w;
-  }
-  const locations = f.locations.value.split("\n").map((l) => l.trim()).filter(Boolean).map((line) => {
-    const [city = "", country = "", code = ""] = line.split(",").map((x) => x.trim());
-    return { city, country, country_code: code.toUpperCase() };
-  });
-  return {
-    name: f.name.value.trim() || null,
-    target_roles: list(f.target_roles.value),
-    locations,
-    open_to_remote: f.open_to_remote.checked,
-    remote_allowed_regions: list(f.remote_allowed_regions.value.toLowerCase()),
-    skills,
-    title_include: list(f.title_include.value.toLowerCase()),
-    title_exclude: list(f.title_exclude.value.toLowerCase()),
-    max_years_required: f.max_years_required.value === "" ? null : Number(f.max_years_required.value),
-    min_score: Math.max(1, Number(f.min_score.value) || 1),
-  };
-}
-
-$("edit-form").addEventListener("submit", async (e) => {
-  if (e.submitter?.value !== "save") return; // Cancel closes the dialog
+// "Add" forms.
+document.querySelectorAll("form.add-row").forEach((form) => form.addEventListener("submit", (e) => {
   e.preventDefault();
-  let changes;
-  try {
-    changes = readProfileForm();
-  } catch (err) {
-    return ($("edit-msg").textContent = err.message);
+  const a = state.applicant;
+  const input = form.querySelector("input");
+  const value = input.value.trim();
+  if (!value) return;
+  const addUnique = (arr, v) => (arr || []).some((x) => x.toLowerCase() === v.toLowerCase()) ? arr : [...(arr || []), v];
+  switch (form.dataset.add) {
+    case "roles":
+      update({ target_roles: addUnique(a.target_roles, value) });
+      break;
+    case "include":
+      update({ title_include: addUnique(a.title_include, value.toLowerCase()) });
+      break;
+    case "regions":
+      update({ remote_allowed_regions: addUnique(a.remote_allowed_regions, value.toLowerCase()) });
+      break;
+    case "skills":
+      update({ skills: { ...a.skills, [value.toLowerCase()]: Number(form.querySelector("select").value) } });
+      break;
+    case "locations": {
+      const code = form.elements.code.value.trim().toUpperCase();
+      if ((a.locations || []).some((p) => (p.city || "").toLowerCase() === value.toLowerCase())) break;
+      update({ locations: [...(a.locations || []), { city: value, country: "", country_code: code }] });
+      form.elements.code.value = "";
+      break;
+    }
   }
-  const { data, error } = await supabase.from("applicant").update(changes)
-    .eq("user_id", state.user.id).select().single();
-  if (error) return ($("edit-msg").textContent = `Save failed: ${error.message}`);
-  state.applicant = data;
-  $("edit-dialog").close();
-  renderProfile();
-  await loadJobs(true);
-});
+  input.value = "";
+  input.focus();
+}));
 
 // ---------------------------------------------------------------- jobs
 
@@ -224,12 +294,13 @@ async function loadJobs(force = false) {
   const args = {
     p_max_days: age === "" ? null : Number(age),
     p_include_ineligible: $("f-all").checked,
-    p_limit: 500,
+    p_limit: $("f-all").checked ? 1500 : null, // all matches; non-matches capped
   };
   const key = JSON.stringify(args);
   if (!force && key === state.loadedArgs) return render();
-  $("stats").textContent = "Matching jobs to your profile…";
+  $("jobs").classList.add("loading");
   const { data, error } = await supabase.rpc("match_jobs", args);
+  $("jobs").classList.remove("loading");
   if (error) {
     $("stats").textContent = `Failed to load jobs: ${error.message}`;
     return;
@@ -255,20 +326,19 @@ function renderSources() {
   $("f-source").innerHTML =
     '<option value="">All sources</option>' + sources.map((s) => `<option>${esc(s)}</option>`).join("");
   if (sources.includes(current)) $("f-source").value = current;
-  $("f-min").max = Math.max(1, ...state.jobs.map((j) => j.score));
 }
 
 function filtered() {
   const q = $("f-search").value.trim().toLowerCase();
   const source = $("f-source").value;
-  const min = +$("f-min").value;
   const remote = $("f-remote").checked;
   const sort = $("f-sort").value;
+  const skill = state.skillFilter;
 
   const out = state.jobs.filter((j) => {
     if (source && j.source.split(":")[0] !== source) return false;
-    if (j.score < min) return false;
     if (remote && !j.remote) return false;
+    if (skill && !j.matched_skills.includes(skill)) return false;
     if (q) {
       const hay = `${j.title} ${j.company} ${j.location} ${j.description_snippet} ${j.matched_skills.join(" ")}`;
       if (!hay.toLowerCase().includes(q)) return false;
@@ -295,18 +365,19 @@ function jobCard(j, maxScore) {
   ].filter(Boolean).join("");
   const weights = state.applicant.skills || {};
   const skills = j.matched_skills.length
-    ? j.matched_skills.map((s) => `<span class="chip hit">${esc(s)}<b>+${weights[s] ?? ""}</b></span>`).join("")
+    ? j.matched_skills.map((s) =>
+        `<button type="button" class="chip hit${s === state.skillFilter ? " active" : ""}" data-filter-skill="${esc(s)}" title="Show only jobs mentioning ${esc(s)}">${esc(s)}<b>+${weights[s] ?? ""}</b></button>`).join("")
     : '<span class="muted small">None of your skills mentioned</span>';
 
   return `
     <article class="job${j.eligible ? "" : " ineligible"}">
-      <div class="rank">${j.eligible ? `#${j.rank}` : "–"}<small>${j.eligible ? "rank" : "filtered"}</small></div>
+      <div class="rank">${j.eligible ? `#${j.rank}` : "–"}<small>${j.eligible ? "rank" : "no match"}</small></div>
       <div>
         <a class="job-title" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>
         <div class="meta">${meta}</div>
         <div class="chips">${skills}</div>
         ${j.description_snippet ? `<p class="desc clamp" title="Click to expand">${esc(j.description_snippet)}</p>` : ""}
-        ${j.eligible ? "" : `<div class="reasons">Doesn't fit: ${esc(j.reasons.join("; "))}</div>`}
+        ${j.eligible ? "" : `<div class="reasons">Not a match: ${esc(j.reasons.join("; "))}</div>`}
       </div>
       <div class="score">
         <div class="score-num s-${cls}">${j.score}</div>
@@ -317,24 +388,45 @@ function jobCard(j, maxScore) {
 }
 
 function render() {
-  $("f-min-label").textContent = $("f-min").value;
   const shown = filtered();
   const maxScore = Math.max(1, ...state.jobs.map((j) => j.score));
   $("jobs").innerHTML = shown.map((j) => jobCard(j, maxScore)).join("");
   $("empty").hidden = shown.length > 0;
   $("empty").textContent = state.jobs.length
     ? "No jobs match these filters."
-    : "No matching jobs yet. Try a longer \"Posted within\" window, or check back after the next daily scrape.";
+    : "No matching jobs yet. Try a longer \"Posted within\" window, lower the minimum score, or add skills and locations.";
+
+  $("active-skill").hidden = !state.skillFilter;
+  $("active-skill").innerHTML = state.skillFilter
+    ? `Showing jobs that mention <b>${esc(state.skillFilter)}</b> <button type="button" class="btn ghost small-btn" id="clear-skill">Clear</button>`
+    : "";
 
   const eligible = state.jobs.filter((j) => j.eligible).length;
-  const capped = state.jobs.length >= 500 ? " (top 500)" : "";
-  $("stats").textContent = `${eligible} jobs fit your profile${capped} · showing ${shown.length}`;
+  $("stats").textContent = `${eligible} jobs match your profile · showing ${shown.length}`;
 }
 
-["f-search", "f-source", "f-min", "f-remote", "f-sort"].forEach((id) => $(id).addEventListener("input", render));
-["f-age", "f-all"].forEach((id) => $(id).addEventListener("input", () => loadJobs()));
+["f-search", "f-source", "f-remote", "f-sort"].forEach((id) => $(id).addEventListener("input", render));
+$("f-age").addEventListener("input", () => {
+  loadJobs();
+  // Remember the choice for next time (no re-rank needed, loadJobs already did it).
+  const max_days_old = $("f-age").value === "" ? null : Number($("f-age").value);
+  state.applicant.max_days_old = max_days_old;
+  supabase.from("applicant").update({ max_days_old }).eq("user_id", state.user.id).then(() => {});
+});
+$("f-all").addEventListener("input", () => loadJobs());
 $("jobs").addEventListener("click", (e) => {
+  const skill = e.target.closest("[data-filter-skill]");
+  if (skill) {
+    state.skillFilter = state.skillFilter === skill.dataset.filterSkill ? null : skill.dataset.filterSkill;
+    return render();
+  }
   if (e.target.classList.contains("desc")) e.target.classList.toggle("clamp");
+});
+$("active-skill").addEventListener("click", (e) => {
+  if (e.target.id === "clear-skill") {
+    state.skillFilter = null;
+    render();
+  }
 });
 
 routeOnce().catch((err) => {

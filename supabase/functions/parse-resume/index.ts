@@ -30,7 +30,7 @@ const PROFILE_SCHEMA = {
   additionalProperties: false,
   required: [
     "name", "headline", "years_experience", "target_roles", "locations", "open_to_remote",
-    "remote_allowed_regions", "skills", "title_include", "title_exclude",
+    "remote_allowed_regions", "skills", "title_include",
     "max_years_required", "min_score",
   ],
   properties: {
@@ -66,7 +66,6 @@ const PROFILE_SCHEMA = {
       },
     },
     title_include: { type: "array", items: { type: "string" } },
-    title_exclude: { type: "array", items: { type: "string" } },
     max_years_required: { type: "integer" },
     min_score: { type: "integer" },
   },
@@ -84,7 +83,6 @@ Fields:
 - remote_allowed_regions: lowercase words a remote posting's location could use that would include this candidate: always "worldwide", "anywhere", "global", plus their country names and regions (e.g. "india", "apac", "asia", or "usa", "united states", "north america").
 - skills: 15-35 lowercase skills, tools and domains from the resume. weight 3 = core skill from recent work, 2 = solid working experience, 1 = familiar or older. Add common spelling variants as separate entries with the same weight (e.g. "node.js" and "nodejs"; "gcp" and "google cloud"). Skip soft skills.
 - title_include: lowercase words, at least one of which a suitable posting title contains (e.g. "engineer", "developer", "software", "data", "analyst"). Broad enough not to miss suitable roles.
-- title_exclude: lowercase words that mark a title as wrong for them: seniority levels above their experience (e.g. "senior", "sr", "staff", "principal", "lead", "manager", "director", "architect", "head", "vp", and level numerals like "iii" when they are mid-level), internships if they are experienced, and unrelated functions (e.g. "sales", "recruiter"). Never include a word that also appears in target_roles.
 - max_years_required: the most years of experience a posting can ask for and still be realistic for them: their years of experience rounded, plus 1 if they are strong for their level.
 - min_score: the minimum sum of matched skill weights for a posting to count as relevant; usually 3-5.`;
 
@@ -165,7 +163,6 @@ Deno.serve(async (req) => {
     remote_allowed_regions: lower(profile.remote_allowed_regions),
     skills: Object.fromEntries(profile.skills.map((s: { skill: string; weight: number }) => [s.skill.trim().toLowerCase(), s.weight])),
     title_include: lower(profile.title_include),
-    title_exclude: lower(profile.title_exclude),
     max_years_required: profile.max_years_required,
     min_score: Math.max(1, profile.min_score),
     resume_path: path,
