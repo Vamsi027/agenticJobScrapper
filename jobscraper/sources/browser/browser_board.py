@@ -1,8 +1,8 @@
 """Playwright-based fetcher for a JS-rendered job board.
 
 Site-agnostic: the board URL and CSS selectors come from the
-"browser_board" block in config.json, so switching boards means
-editing config, not code.
+"browser_board" block in jobscraper/settings.py, so switching boards means
+editing settings, not code.
 
 Optional config keys:
   detail_fields  field -> selector read from each job's own page (e.g. the
@@ -47,7 +47,7 @@ def fetch(config):
         field_selectors=board.get("fields", {}),
         link_selector=board.get("link_selector"),
         wait_selector=board.get("wait_selector"),
-        limit=config.get("max_per_source", 100),
+        limit=config.get("max_per_source") or 100,
         detail_fields=board.get("detail_fields"),
         detail_limit=board.get("detail_limit"),
     )
@@ -63,7 +63,7 @@ def fetch(config):
             "salary": rec.get("salary", ""),
             "url": rec.get("url", ""),
             "posted_date": parse_posted(rec.get("posted", "")),
-            "description_snippet": rec.get("description", ""),
+            "description": rec.get("description", ""),
             "source": f"browser:{board.get('name', 'board')}",
         })
     return jobs

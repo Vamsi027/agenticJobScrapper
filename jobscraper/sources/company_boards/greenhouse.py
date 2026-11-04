@@ -1,12 +1,12 @@
-"""Greenhouse public job boards, one API call per company in the config."""
+"""Greenhouse public job boards, one API call per company. Every posting is kept."""
 
 from jobscraper.fetchers import get_json
-from jobscraper.normalize import clean_text, config_location_ok
+from jobscraper.normalize import clean_text
 from jobscraper.sites import GREENHOUSE_API as API_URL
 
 
 def fetch(config):
-    limit = config.get("max_per_source", 100)
+    limit = config.get("max_per_source")
     jobs = []
     for company in config.get("greenhouse_companies", []):
         try:
@@ -14,15 +14,8 @@ def fetch(config):
         except Exception as exc:
             print(f"  greenhouse/{company}: skipped ({exc})")
             continue
-        kept = 0
-        for entry in data.get("jobs", []):
+        for entry in data.get("jobs", [])[:limit]:
             location = clean_text((entry.get("location") or {}).get("name", ""))
-            # Big boards list hundreds of jobs worldwide; cap only the ones we'd keep.
-            if not config_location_ok(location, "remote" in location.lower(), config):
-                continue
-            if kept >= limit:
-                break
-            kept += 1
             jobs.append({
                 "title": entry.get("title", ""),
                 "company": company,
@@ -32,7 +25,7 @@ def fetch(config):
                 "url": entry.get("absolute_url", ""),
                 # first_published = original posting date; updated_at changes on every edit
                 "posted_date": (entry.get("first_published") or entry.get("updated_at") or "")[:10],
-                "description_snippet": entry.get("content", ""),
+                "description": entry.get("content", ""),
                 "source": "greenhouse",
             })
     return jobs

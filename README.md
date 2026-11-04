@@ -1,219 +1,136 @@
-# agenticProj — Job Scraping Workflow
+# agenticProj — Job Matching
 
-An agentic pipeline that collects job postings from popular job sites, normalizes them into a single schema, and saves the results for review.
+A daily scraper collects job postings from many job sites into Supabase, unfiltered. Anyone can sign in, upload a resume, and see every stored posting ranked against their own skills, experience, target roles and locations.
 
-## Workflow overview
+## How it works
 
 ```
-┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌─────────────┐   ┌──────────┐
-│ 1. Sources   │ → │ 2. Fetch      │ → │ 3. Parse      │ → │ 4. Normalize │ → │ 5. Output │
-│ (site list,  │   │ (API / HTTP / │   │ (extract      │   │ + dedupe     │   │ (JSON/CSV/│
-│  keywords)   │   │  web MCP)     │   │  job fields)  │   │  + filter    │   │  SQLite)  │
-└─────────────┘   └──────────────┘   └──────────────┘   └─────────────┘   └──────────┘
+                 daily (GitHub Actions)                              in the browser (GitHub Pages)
+┌───────────────────────────────────────────────────┐     ┌──────────────────────────────────────────────┐
+│ applicants' target roles + cities -> search queries│     │ sign in (email link) -> upload resume (PDF)  │
+│ fetch all sources -> clean + dedupe                │     │   -> parse-resume Edge Function (Claude)     │
+│   -> upsert into job_postings (no filtering)       │     │   -> applicant row                           │
+└───────────────────────────────────────────────────┘     │ match_jobs() ranks job_postings for the user │
+                         │                                 └──────────────────────────────────────────────┘
+                         └──────────────── Supabase (Postgres + Auth + Storage) ─────┘
 ```
 
-### Stage 1 — Sources
+### Supabase objects
 
-Define search targets in `config/config.json`: keywords, `locations` (currently `["Hyderabad", "Remote"]`), and which sites to query. A remote job only counts if its location names a region in `remote_allowed_regions` (worldwide, India, APAC...) or no place at all, so "Remote - US" is dropped.
+| Object | What it holds | Who can access it |
+|---|---|---|
+| `job_postings` | Every scraped posting: title, company, location, remote, salary, url, full description, posted date, years required, source, first/last seen | Everyone can read; only the scraper (secret key) writes |
+| `applicant` | One row per user: name, headline, years of experience, target roles, locations, remote preference, weighted skills, title include/exclude words, max years a job may ask for, min score, resume path | Each user reads/edits only their own row; rows are created by the Edge Function |
+| `match_jobs(p_max_days, p_include_ineligible, p_limit)` | Scores postings for the signed-in user: sum of matched skill weights, and the reasons a job doesn't fit (title, seniority, years, score, location) | Signed-in users |
+| `ingest_jobs(jobs)` | Upsert used by the scraper; returns which postings are new | Scraper only |
+| `resumes` bucket | Uploaded resumes, `resumes/<user id>/resume.pdf` | Each user only their own folder |
+| `parse-resume` Edge Function | Sends the resume to Claude (`claude-opus-5-5`, structured output) and saves the profile | Signed-in users |
 
-| Source | Access method | Covers | Auth |
+Schema and policies: [supabase/migrations/](supabase/migrations/). The first applicant (the profile that used to live in `config/config.json`) is seeded with an email address and attaches to that account on its first sign-in.
+
+### Sources
+
+| Source | Access method | What is fetched | Auth |
 |---|---|---|---|
-| RemoteOK, Remotive, Jobicy | Public JSON APIs | Remote | None |
-| Hacker News "Who is hiring" | Algolia API | Remote, some India | None |
-| Greenhouse / Lever boards | Public JSON per company | Hyderabad + "Remote - India" | None |
-| Adzuna India | API (`country=in`, `where=Hyderabad`) | Hyderabad | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (free) |
-| JSearch (RapidAPI) | API over Google for Jobs | Hyderabad + remote; includes LinkedIn/Naukri/Indeed listings | `RAPIDAPI_KEY` (free tier) |
-| LinkedIn (Bright Data) | Bright Data Web Scraper API, keyword discovery | Hyderabad + remote India | `BRIGHTDATA_API_KEY` (paid, per record) |
-| LinkedIn (direct), Naukri, Indeed India, Glassdoor, foundit, Instahyre, Wellfound, Cutshort | Browser only | Hyderabad | Login wall or anti-bot; not fetched directly (LinkedIn comes via Bright Data, the rest via JSearch) |
+| RemoteOK, Remotive, Jobicy | Public JSON APIs | Everything they return (Remotive's API caps at 10) | None |
+| Hacker News "Who is hiring" | Algolia API | Every top-level comment in the latest thread | None |
+| Greenhouse / Lever boards | Public JSON per company | Every posting, worldwide | None |
+| Browser board (Workday) | Playwright | First results page of one employer | None |
+| Adzuna | API | One search per (target role, city) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (free) |
+| JSearch (RapidAPI) | API over Google for Jobs | One search per (role, city) or (role, remote) | `RAPIDAPI_KEY` (free tier) |
+| LinkedIn (Bright Data) | Web Scraper API, keyword discovery | Same searches, one snapshot per run | `BRIGHTDATA_API_KEY` (paid, per record) |
 
-### Job age
+The search-based sources (Adzuna, JSearch, Bright Data) need search terms, and they cost quota or money per query. They are built from **all applicants combined**: each applicant's target roles x cities, plus a remote search per role. Searches shared by more applicants come first, then applicants take turns, and each source stops at its `max_queries` ([jobscraper/settings.py](jobscraper/settings.py)). So the cost grows with the number of distinct roles and places, not with the number of users.
 
-`max_days_old` (default `5`) drops postings published more than that many days ago, and postings with no date. The aggregators are also asked for recent jobs only: `adzuna.max_days_old` is `5` and `jsearch.date_posted` is `"week"` (JSearch has no 5-day option). Greenhouse dates use `first_published`, not `updated_at`, because editing an old posting changes `updated_at`. Remove `max_days_old` to keep jobs of any age. The web UI's **Posted within** filter starts at the same value and can be widened to see older stored jobs.
+Bright Data bills per record: at most `max_queries x limit_per_input` (4 x 25 = 100) LinkedIn records per run. If a run times out, the snapshot keeps running on Bright Data's side and is still billed. LinkedIn's terms prohibit scraping; Bright Data collects only publicly visible postings, but whether to use it is your call.
 
-### Resume profile (ranking)
+Postings are deduplicated on company + title + location. A posting that no source has returned for `prune_after_days` (60) is deleted.
 
-The `profile` block in `config/config.json` filters and ranks jobs against the resume:
+### Matching
 
-- `title_include` / `title_exclude`: the title must name an engineering role and must not be above the target level (staff, principal, lead, manager...).
-- `max_years_required`: drops postings whose lowest "N+ years" requirement is higher than this.
-- `skills`: weight per skill; a job's score is the sum of weights found in its title + description. Jobs below `min_score` are dropped.
+A posting **fits** a user when:
 
-Results are printed and exported highest score first (`score` column in the database/CSV). Remove the `profile` block to fall back to plain `keywords` matching.
+- its title contains one of their `title_include` words and none of their `title_exclude` words (e.g. senior, staff, lead);
+- it doesn't ask for more than `max_years_required` years;
+- the sum of the weights of their skills found in the title + description is at least `min_score`;
+- it is in one of their cities, or it is remote and either names one of their `remote_allowed_regions` or names no place.
 
-### API keys
+Skills are matched as whole terms, so `java` doesn't match `javascript`. Users can review and edit all of these with **Edit profile** in the UI. Uploading a new resume rebuilds the profile.
 
-Adzuna and JSearch are skipped until their keys are set. Set them once as user environment variables (PowerShell), then open a new terminal:
+## Setup
+
+### 1. Supabase
+
+1. Apply the migrations in [supabase/migrations/](supabase/migrations/), in filename order: SQL editor, or `supabase db push` with the Supabase CLI.
+2. Deploy the Edge Function and give it a Claude API key:
+   ```sh
+   supabase functions deploy parse-resume --no-verify-jwt   # the function verifies the user itself
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   ```
+3. **Authentication -> URL Configuration**: set **Site URL** to the GitHub Pages URL and add `http://localhost:8000` and the Pages URL under **Redirect URLs**. Magic links redirect only to listed URLs.
+4. For more than a handful of users, set up custom SMTP (**Authentication -> Emails**). The built-in email sender is rate-limited to a few emails per hour.
+
+### 2. Scraper keys
+
+The scraper writes with a **secret** key (Project Settings -> API Keys -> Secret keys). It bypasses row-level security: keep it out of the browser and out of git.
 
 ```powershell
-setx ADZUNA_APP_ID  "your-app-id"     # https://developer.adzuna.com/signup
-setx ADZUNA_APP_KEY "your-app-key"
-setx RAPIDAPI_KEY   "your-rapidapi-key"  # subscribe to JSearch's free plan on RapidAPI
+setx SUPABASE_URL        "https://<project-ref>.supabase.co"
+setx SUPABASE_SECRET_KEY "sb_secret_..."
+setx ADZUNA_APP_ID       "your-app-id"       # https://developer.adzuna.com/signup
+setx ADZUNA_APP_KEY      "your-app-key"
+setx RAPIDAPI_KEY        "your-rapidapi-key" # JSearch free plan on RapidAPI
+setx BRIGHTDATA_API_KEY  "your-key"          # Bright Data -> Account settings -> API keys
 ```
 
-```powershell
-setx BRIGHTDATA_API_KEY "your-key"   # Bright Data control panel -> Account settings -> API keys
-```
+A missing source key just skips that source. Open a new terminal after `setx`.
 
-**LinkedIn via Bright Data** (`brightdata_linkedin` in config): each run starts one Bright Data keyword-discovery job covering every entry in `brightdata_linkedin.queries`, polls until it's ready (usually a few minutes, up to `timeout_minutes`), then downloads the results. Bright Data bills per record, so `limit_per_input` (default 25) caps a run at `limit_per_input x number of queries` records, 100 by default. Query fields: `keyword`, `location` (required), `country`, `time_range` (`Past 24 hours` / `Past week` / `Past month` / `Any time`), `experience_level` (e.g. `Entry level`, `Associate`, `Mid-Senior level`), `job_type`, `remote` (`Remote` / `On-site` / `Hybrid`), `company`. If a run times out, the job keeps running on Bright Data's side and is still billed. Raise `timeout_minutes` rather than re-running straight away. LinkedIn's terms prohibit scraping; Bright Data collects only publicly visible postings, but whether to use it is your call.
-
-JSearch's free plan has a small monthly request quota; each run uses one request per entry in `jsearch.queries` (2 by default).
-
-**Prefer APIs over HTML scraping wherever one exists** — they are faster, more stable, and don't break when the page layout changes.
-
-### Stage 2 — Fetch
-
-Two fetch strategies, chosen per source:
-
-1. **Direct HTTP** (`requests` / `httpx`) for API-based sources — the default.
-2. **Browser automation** for JavaScript-rendered sites — via a **web MCP server** (see below) or Playwright directly.
-
-### Stage 3 — Parse
-
-Extract a common set of fields from each posting: `title`, `company`, `location`, `remote`, `salary`, `url`, `posted_date`, `description_snippet`, `source`.
-
-### Stage 4 — Normalize, dedupe, filter
-
-- Lowercase/trim fields, parse dates to ISO format.
-- Dedupe on `(company, title)` or canonical URL — the same job often appears on multiple boards.
-- Apply keyword/location filters from the config.
-
-### Stage 5 — Output
-
-Append results to `data/jobs.sqlite` (or `jobs.json` / `jobs.csv`). Only newly seen jobs are reported on each run, so the workflow can run daily as a cron/scheduled task.
-
-## Can a web MCP be used as the scraping tool?
-
-**Yes — and it's a good fit for the hard sites, but not for all of them.**
-
-An MCP (Model Context Protocol) server that exposes browser/web tools — e.g. the **Playwright MCP server** (`@playwright/mcp`), a **Fetch MCP server**, or Claude Code's built-in browser tools — lets the agent:
-
-- Navigate pages, click "Load more"/pagination, and fill search forms.
-- Read fully JavaScript-rendered content (LinkedIn, Indeed, Glassdoor render jobs client-side, so plain `requests` gets nothing useful).
-- Extract structured data by reading the page accessibility tree or running small page scripts.
-
-**When to use web MCP:** JS-heavy sites, sites requiring login or interaction, and one-off exploratory scraping where the agent adapts to page structure on the fly.
-
-**When NOT to use it:** sources with a JSON API (RemoteOK, Greenhouse, Lever, HN). Driving a browser through an LLM for those is slower, costs tokens, and adds flakiness — a plain HTTP call in Python is strictly better.
-
-**Caveats:**
-
-- Anti-bot systems (Cloudflare, LinkedIn's detection) can still block an MCP-driven browser; it is not a bypass tool.
-- Respect each site's `robots.txt` and Terms of Service, use modest request rates, and prefer official APIs. LinkedIn's ToS in particular prohibits scraping.
-- MCP-based scraping runs inside an agent session; for a scheduled headless pipeline, plain Playwright/`httpx` in Python is easier to automate.
-
-**Recommended hybrid:** Python + `httpx` for all API sources (the bulk of the data), with a web MCP server as the agent-driven fallback for the few JS-rendered boards you care about.
-
-## Requirements
-
-- Python 3.10+
-- `httpx` (or `requests`) for API fetching
-- Optional: `playwright` or a web MCP server (e.g. `npx @playwright/mcp`) for browser-based sources
-- Optional: `sqlite3` (stdlib) for storage
+### 3. Run
 
 ```sh
 pip install -r requirements.txt
-playwright install chromium   # only if using browser-based fetching
+playwright install chromium                     # only for the browser board
+
+python -m jobscraper                            # full run: query applicants, scrape, upsert
+python -m jobscraper --only remoteok,greenhouse # just these sources
+python -m jobscraper --dry-run                  # fetch and count; doesn't touch Supabase
+python -m jobscraper.web                        # UI at http://localhost:8000
 ```
 
-## Running it
+The UI's Supabase URL and publishable key are in [jobscraper/static/config.js](jobscraper/static/config.js). Both are safe to publish.
 
-Run from the project root:
+## Hosting
 
-```sh
-python -m jobscraper                             # full pipeline with config/config.json
-python -m jobscraper --config config/other.json  # alternate config
-python -m jobscraper.export                      # export the database to data/jobs.csv (Excel-friendly)
-python -m jobscraper.web                         # browse ranked jobs at http://127.0.0.1:8000
-python -m jobscraper.web --export site           # static copy of the UI (what GitHub Pages serves)
-```
+- [.github/workflows/daily-scrape.yml](.github/workflows/daily-scrape.yml) runs the scraper every day at **07:00 IST**. Add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and any source keys under **Settings -> Secrets and variables -> Actions**. **Actions -> Daily job scrape -> Run workflow** runs it now.
+- [.github/workflows/pages.yml](.github/workflows/pages.yml) publishes `jobscraper/static` to GitHub Pages when it changes (**Settings -> Pages -> Source: GitHub Actions**).
+- GitHub pauses scheduled workflows after 60 days without repository activity. The scraper no longer commits data, so re-enable the workflow if that happens.
 
-### Web UI
-
-`python -m jobscraper.web` (options: `--port`, `--host`, `--config`) serves a local page that lists every job in `data/jobs.sqlite`, ranked by resume-match score. Jobs are re-scored on each page load against the current `profile`, so after you edit `config/config.json`, refresh the page to see the new ranking. Each job card shows its rank, score, which profile skills matched, and years required. Jobs that fail the profile filters are hidden; turn on "Show jobs that don't fit profile" to see them along with the reason each one was dropped. Use the **Run scraper** button to fetch new postings without leaving the page.
-
-Each run prints per-source counts and lists only jobs not seen in previous runs. Results accumulate in `data/jobs.sqlite`.
-
-Edit `config/config.json` to change keywords, locations, remote-only filtering, enabled sources, and the Greenhouse/Lever company lists. The company lists were picked because they had Hyderabad or Remote-India openings (checked against the live APIs in Nov 2026; zenoti, singlestore, starburst, netskope, airbnb, yugabyte, sentinellabs, fivetran and turing were added then). Company boards return every posting worldwide, so `max_per_source` caps only the postings that pass the location filter.
-
-### Browser board (JS-rendered sites)
-
-`browser_board` uses Playwright (`pip install playwright && playwright install chromium`) to scrape one JS-rendered board defined in config. It's set up for **S&P Global's Workday careers site** (a large Hyderabad tech employer). Its `data-automation-id` selectors work on any `*.myworkdayjobs.com` board, so to switch to another Workday company you only change `name` and `url` (keep the search in `?q=`).
-
-- `fields`: CSS selectors read from each list item (`title`, `location`, `posted`, ...). A "Posted 3 Days Ago" label becomes an ISO date.
-- `detail_fields`: selectors read from each job's own page, which override the list value. Used to get the full description (without it, skill scoring only sees the title) and every location (the list just says "2 Locations"). This costs one page load per job, roughly 2s each, capped by `detail_limit`.
-
-Large employers' boards skew senior, so many runs will add nothing that passes the profile. That's expected.
+**Privacy:** resumes and profiles are private to each user (row-level security and storage policies). Job postings are public. Resumes are sent to the Claude API for parsing.
 
 ## Project layout
 
 ```
 agenticProj/
 ├── .github/workflows/
-│   └── daily-scrape.yml       Daily GitHub Actions run + GitHub Pages deploy
-├── config/
-│   └── config.json            Keywords, locations, resume profile, sources, company lists
-├── data/                      Output: jobs.sqlite + ranked_jobs.csv (committed), jobs.csv (gitignored)
+│   ├── daily-scrape.yml       Daily scrape into Supabase
+│   └── pages.yml              Deploy the UI to GitHub Pages
+├── supabase/
+│   ├── migrations/            Schema, RLS policies, match_jobs(), storage bucket, first applicant
+│   └── functions/parse-resume Edge Function: resume -> applicant profile via Claude
 ├── jobscraper/                Python package
 │   ├── __main__.py            Entry point for `python -m jobscraper`
-│   ├── pipeline.py            Orchestrates the 5 stages
-│   ├── sites.py               Registry of job sites + API endpoint constants
-│   ├── fetchers.py            HTTP (httpx) + browser (Playwright) fetch helpers
-│   ├── normalize.py           Cleanup, location filter, resume scoring, dedupe
-│   ├── storage.py             SQLite writer; returns only never-seen-before jobs
-│   ├── export.py              SQLite -> CSV
-│   ├── web.py                 Local web UI server (python -m jobscraper.web)
-│   ├── static/                UI frontend: index.html, app.js, style.css
-│   └── sources/
-│       ├── __init__.py        SOURCES registry (config name -> module)
-│       ├── remote_boards/     remoteok, remotive, jobicy, hn   (no auth)
-│       ├── company_boards/    greenhouse, lever                (no auth, per company)
-│       ├── aggregators/       adzuna, jsearch, brightdata_linkedin (API keys)
-│       └── browser/           browser_board                    (Playwright)
-├── requirements.txt           httpx, playwright
-├── .gitignore
+│   ├── pipeline.py            Applicants -> queries -> fetch -> normalize -> upsert
+│   ├── settings.py            Enabled sources, company lists, per-source limits
+│   ├── queries.py             Builds search targets from all applicants
+│   ├── db.py                  Supabase REST client (applicants, ingest, prune)
+│   ├── normalize.py           Cleanup, dates, years required, dedupe
+│   ├── sites.py               API endpoint constants
+│   ├── fetchers.py            HTTP (httpx) + browser (Playwright) helpers
+│   ├── web.py                 Local static server for the UI
+│   ├── static/                UI: index.html, app.js, style.css, config.js
+│   └── sources/               remote_boards/, company_boards/, aggregators/, browser/
+├── requirements.txt
 └── README.md
 ```
 
-To add a source: create a module with `fetch(config)` in the matching `sources/` subfolder, add its URL to `sites.py`, register it in `sources/__init__.py`, and enable it under `sources` in the config.
-
-## Hosting on GitHub (daily scheduled run)
-
-`.github/workflows/daily-scrape.yml` runs the whole pipeline on GitHub Actions every day at **07:00 IST** (01:30 UTC; GitHub can start scheduled runs up to about 30 minutes late). Each run:
-
-1. Installs `requirements.txt` and Playwright's Chromium.
-2. Runs `python -m jobscraper` with your API keys taken from repository secrets.
-3. Commits the updated `data/jobs.sqlite` back to the repo. That's how the next run knows which jobs are new, and the daily commits also stop GitHub from pausing the schedule after 60 days of inactivity.
-4. Publishes a read-only copy of the web UI to GitHub Pages (`python -m jobscraper.web --export site`). On the hosted copy, the Run scraper button is hidden and the page shows when the data was last updated.
-
-### One-time setup
-
-1. Create an **empty** repository on github.com (no README or .gitignore).
-2. Push this project from the project root:
-   ```powershell
-   git init -b main
-   git add .
-   git commit -m "Job scraper"
-   git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin main
-   ```
-3. **Settings -> Secrets and variables -> Actions -> New repository secret**: add `BRIGHTDATA_API_KEY`, and `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `RAPIDAPI_KEY` if you have them. A missing key just skips that source.
-4. **Settings -> Pages -> Build and deployment -> Source: GitHub Actions**.
-5. **Actions -> Daily job scrape -> Run workflow** to test it now. When it finishes, the site is at `https://<you>.github.io/<repo>/`.
-
-**Privacy:** a GitHub Pages site is public, even when the repo is private (private-repo Pages also needs a paid plan). Anyone with the URL can see the job list and the profile summary from `config.json` (the `profile._comment` text). In a public repo the config and database are visible too. Edit `_comment` if that's more than you want to share.
-
-**Cost:** each run uses Bright Data credits (at most `limit_per_input x queries` LinkedIn records) and JSearch quota. To pause, use **Actions -> Daily job scrape -> ... -> Disable workflow**.
-
-### Running locally on a schedule instead (Windows)
-
-```sh
-schtasks /Create /SC DAILY /ST 09:00 /TN "JobScraper" ^
-  /TR "cmd /c cd /d C:\Users\underratedNoob\Documents\agenticProj && python -m jobscraper"
-```
-
-Because storage dedupes on `(company, title)`, each scheduled run reports only newly appeared jobs.
-
-## Next steps
-
-- Add more companies to `greenhouse_companies` / `lever_companies` as your targets change (check a board with `https://boards-api.greenhouse.io/v1/boards/<slug>/jobs`).
-- Point `browser_board` at another Workday employer if S&P Global keeps producing no matches.
+To add a source: create a module with `fetch(config)` in the matching `sources/` subfolder, register it in `sources/__init__.py`, and enable it in `settings.py`. Search-based sources read `config["search_targets"]`.

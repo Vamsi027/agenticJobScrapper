@@ -29,22 +29,26 @@ def _first_line(comment_html):
 
 
 def fetch(config):
-    limit = config.get("max_per_source", 100)
+    limit = config.get("max_per_source") or 1000  # Algolia's per-page maximum
     thread_id = _latest_thread_id()
     if not thread_id:
         return []
 
-    keywords = config.get("keywords", [])
-    query = " ".join(keywords) if keywords else ""
-    data = get_json(SEARCH_URL, params={
-        "query": query,
-        "optionalWords": query,  # match any keyword, not all of them
-        "tags": f"comment,story_{thread_id}",
-        "hitsPerPage": limit,
-    })
+    hits, page = [], 0
+    while len(hits) < limit:
+        data = get_json(SEARCH_URL, params={
+            "tags": f"comment,story_{thread_id}",
+            "hitsPerPage": min(limit, 1000),
+            "page": page,
+        })
+        # Only top-level comments are job posts; replies are discussion.
+        hits += [h for h in data.get("hits", []) if str(h.get("parent_id")) == str(thread_id)]
+        page += 1
+        if page >= data.get("nbPages", 0):
+            break
 
     jobs = []
-    for hit in data.get("hits", []):
+    for hit in hits[:limit]:
         comment = hit.get("comment_text") or ""
         header = _first_line(comment)
         if not header:
@@ -61,7 +65,7 @@ def fetch(config):
             "salary": "",
             "url": f"https://news.ycombinator.com/item?id={hit['objectID']}",
             "posted_date": (hit.get("created_at") or "")[:10],
-            "description_snippet": comment,
+            "description": comment,
             "source": "hn",
         })
     return jobs

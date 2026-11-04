@@ -1,10 +1,8 @@
-# Runs the scraper every morning, saves the database back to the repo (so the
-# next run knows which jobs it has already seen), and publishes the job list
-# to GitHub Pages.
+# Runs the scraper every morning and upserts every posting into Supabase.
 #
-# One-time setup (see README "Hosting on GitHub"):
-#   - Settings -> Secrets and variables -> Actions: add the API keys below
-#   - Settings -> Pages -> Source: "GitHub Actions"
+# One-time setup (see README "Hosting"):
+#   Settings -> Secrets and variables -> Actions: add SUPABASE_URL,
+#   SUPABASE_SECRET_KEY and any source API keys below.
 
 name: Daily job scrape
 
@@ -14,9 +12,7 @@ on:
   workflow_dispatch:        # "Run workflow" button in the Actions tab
 
 permissions:
-  contents: write   # commit the updated database
-  pages: write      # publish the site
-  id-token: write   # required by deploy-pages
+  contents: read
 
 concurrency:
   group: daily-scrape
@@ -26,9 +22,6 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
 
@@ -44,36 +37,10 @@ jobs:
 
       - name: Run scraper
         env:
-          TZ: Asia/Kolkata   # "posted within N days" is counted in IST
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
           ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           BRIGHTDATA_API_KEY: ${{ secrets.BRIGHTDATA_API_KEY }}
         run: python -m jobscraper
-
-      - name: Build site
-        env:
-          TZ: Asia/Kolkata
-        run: python -m jobscraper.web --export site
-
-      - name: Save database to the repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/jobs.sqlite data/ranked_jobs.csv
-          if git diff --cached --quiet; then
-            echo "No data changes"
-          else
-            git commit -m "Daily scrape $(date -u +%F)"
-            git pull --rebase
-            git push
-          fi
-
-      - uses: actions/configure-pages@v6
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-
-      - id: deployment
-        uses: actions/deploy-pages@v5

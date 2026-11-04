@@ -160,3 +160,37 @@ a { color: var(--accent); }
 .s-low { color: var(--low); }   .bg-low { background: var(--low); }
 
 .empty { text-align: center; padding: 40px 0; }
+
+/* ---- auth / upload / editor ---- */
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+.btn.small-btn { padding: 5px 10px; font-size: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.panel-actions { margin-top: 14px; }
+.center-card { max-width: 480px; margin: 48px auto; padding: 0 16px; }
+.center-card .panel { padding: 24px; }
+.center-card p { margin: 6px 0 16px; }
+.field input:not([type=checkbox]):not([type=range]), .field textarea {
+  font: inherit;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+}
+.field textarea { resize: vertical; }
+.field em { font-style: normal; font-size: 12px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.warn-text { color: var(--mid); min-height: 1em; }
+dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  width: min(560px, 94vw);
+}
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+.edit-form { padding: 20px; }
+.edit-form > p { margin: 0 0 14px; }
+.edit-form .check { margin-bottom: 12px; }

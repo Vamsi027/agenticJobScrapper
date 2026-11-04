@@ -4,8 +4,10 @@ Uses the "LinkedIn job listings" dataset with keyword discovery. Discovery is
 always asynchronous: trigger one job for all queries -> poll progress ->
 download the snapshot. Takes a few minutes per run.
 
-Bright Data bills per record returned, so "limit_per_input" in the config
-caps the cost: at most limit_per_input x number of queries records per run.
+Queries come from the applicants' search targets (role x city, plus a remote
+query per role and country), capped by brightdata_linkedin.max_queries.
+Bright Data bills per record returned, so the cost per run is at most
+limit_per_input x max_queries records.
 Docs: https://docs.brightdata.com/api-reference/scrapers/social-media-apis/linkedin-jobs-discover-by-keyword
 """
 
@@ -50,7 +52,7 @@ def _to_job(entry):
         "salary": _salary(entry),
         "url": (entry.get("url") or "").split("?")[0],
         "posted_date": entry.get("job_posted_date") or "",
-        "description_snippet": entry.get("job_summary") or "",
+        "description": entry.get("job_summary") or "",
         "source": "linkedin",
     }
 
@@ -90,9 +92,22 @@ def download(client, snapshot_id):
     return resp.json()
 
 
-def collect(client, settings):
+def queries(config):
+    settings = config.get("brightdata_linkedin", {})
+    out = []
+    for target in config.get("search_targets", []):
+        q = {"keyword": target["role"], "country": target["country_code"],
+             "time_range": settings.get("time_range", "Past week")}
+        if target["remote"]:
+            q.update(location=target["country"] or "Worldwide", remote="Remote")
+        else:
+            q["location"] = target["city"]
+        out.append(q)
+    return out[: settings.get("max_queries", 4)]
+
+
+def collect(client, settings, queries):
     """Trigger, wait, download; returns raw Bright Data records."""
-    queries = settings.get("queries", [])
     if not queries:
         return []
     snapshot_id = trigger(client, queries, settings.get("limit_per_input", 25))
@@ -112,7 +127,7 @@ def fetch(config, transport=None):
     settings = config.get("brightdata_linkedin", {})
     headers = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(headers=headers, timeout=60, transport=transport) as client:
-        records = collect(client, settings)
+        records = collect(client, settings, queries(config))
 
     jobs, errors = [], 0
     for entry in records:
@@ -123,4 +138,4 @@ def fetch(config, transport=None):
         jobs.append(_to_job(entry))
     if errors:
         print(f"  linkedin: {errors} error/empty records skipped")
-    return jobs[: config.get("max_per_source", 100)]
+    return jobs[: config.get("max_per_source")]
