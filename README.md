@@ -20,7 +20,7 @@ A daily scraper collects job postings from many job sites into Supabase, unfilte
 | Object | What it holds | Who can access it |
 |---|---|---|
 | `job_postings` | Every scraped posting: title, company, location, remote, salary, url, full description, posted date, years required, source, first/last seen | Everyone can read; only the scraper (secret key) writes |
-| `applicant` | One row per user: name, headline, years of experience, target roles, locations, remote preference, weighted skills, title include/exclude words, max years a job may ask for, min score, resume path | Each user reads/edits only their own row; rows are created by the Edge Function |
+| `applicant` | One row per user: name, headline, years of experience, target roles, locations, remote preference, weighted skills, title words, max years a job may ask for, min score, resume path | Each user reads/edits only their own row; rows are created by the Edge Function |
 | `match_jobs(p_max_days, p_include_ineligible, p_limit)` | Scores postings for the signed-in user: sum of matched skill weights, and the reasons a job doesn't fit (title, seniority, years, score, location) | Signed-in users |
 | `ingest_jobs(jobs)` | Upsert used by the scraper; returns which postings are new | Scraper only |
 | `resumes` bucket | Uploaded resumes, `resumes/<user id>/resume.pdf` | Each user only their own folder |
@@ -50,12 +50,12 @@ Postings are deduplicated on company + title + location. A posting that no sourc
 
 A posting **fits** a user when:
 
-- its title contains one of their `title_include` words and none of their `title_exclude` words (e.g. senior, staff, lead);
+- its title contains one of their `title_include` words (e.g. engineer, developer), if they have any;
 - it doesn't ask for more than `max_years_required` years;
 - the sum of the weights of their skills found in the title + description is at least `min_score`;
 - it is in one of their cities, or it is remote and either names one of their `remote_allowed_regions` or names no place.
 
-Skills are matched as whole terms, so `java` doesn't match `javascript`. Users can review and edit all of these with **Edit profile** in the UI. Uploading a new resume rebuilds the profile.
+Seniority isn't filtered: senior and lead roles show up when they match. Skills are matched as whole terms through a full-text index, so `java` doesn't match `javascript` but does match `Java/Kotlin`, and `node.js`, `c++`, `c#`, `ci/cd` work as written. Users edit roles, locations, skill weights, the minimum score and the years limit directly in the sidebar; changes save automatically and re-rank the list. Uploading a new resume rebuilds the profile.
 
 ## Setup
 
