@@ -114,7 +114,8 @@ Deno.serve(async (req) => {
     ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: encodeBase64(new Uint8Array(await file.arrayBuffer())) } }
     : { type: "document" as const, source: { type: "text" as const, media_type: "text/plain" as const, data: await file.text() } };
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  // Pasted secrets often carry quotes or whitespace; strip them.
+  const apiKey = (Deno.env.get("ANTHROPIC_API_KEY") ?? "").trim().replace(/^["']|["']$/g, "").trim();
   if (!apiKey) {
     console.error("ANTHROPIC_API_KEY secret is not set");
     return json({ error: "Resume parsing isn't configured yet (missing Claude API key)." }, 503);
@@ -142,6 +143,12 @@ Deno.serve(async (req) => {
     const text = response.content.find((b: { type: string }) => b.type === "text") as { text: string } | undefined;
     profile = JSON.parse(text?.text ?? "");
   } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+      // Log only the key's shape, never the key: a Claude API key looks like sk-ant-api03-... (~108 chars).
+      console.error("Claude API key rejected", err.status, err.message,
+        `key prefix=${apiKey.slice(0, 10)} length=${apiKey.length}`);
+      return json({ error: "Resume parsing isn't set up correctly (the Claude API key was rejected)." }, 503);
+    }
     if (err instanceof Anthropic.APIError) {
       console.error("Claude API error", err.status, err.message);
       return json({ error: "Resume parsing is unavailable right now. Try again in a minute." }, 502);
@@ -153,7 +160,8 @@ Deno.serve(async (req) => {
   const lower = (xs: string[]) => [...new Set(xs.map((x) => x.trim().toLowerCase()).filter(Boolean))];
   const row = {
     user_id: user.id,
-    email: user.email?.toLowerCase() ?? null,
+    // Guests (anonymous users) have email "" - store null, or the unique index collides.
+    email: user.email ? user.email.toLowerCase() : null,
     name: profile.name || null,
     headline: profile.headline,
     years_experience: profile.years_experience,
